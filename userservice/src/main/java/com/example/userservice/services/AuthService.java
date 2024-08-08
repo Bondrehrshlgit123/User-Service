@@ -6,6 +6,10 @@ import com.example.userservice.models.SessionStatus;
 import com.example.userservice.models.User;
 import com.example.userservice.repositories.SessionRepository;
 import com.example.userservice.repositories.UserRepository;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jws;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.SignatureException;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
@@ -16,22 +20,22 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.MultiValueMap;
 import org.springframework.util.MultiValueMapAdapter;
 
-import java.util.Calendar;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Optional;
+import javax.crypto.SecretKey;
+import java.util.*;
 
 @Service
 public class AuthService {
     private UserRepository userRepository;
     private SessionRepository sessionRepository;
     private BCryptPasswordEncoder bCryptPasswordEncoder;
+    private SecretKey secretKey;
     @Autowired
     public AuthService(UserRepository userRepository, SessionRepository sessionRepository,
                        BCryptPasswordEncoder bCryptPasswordEncoder){
         this.userRepository=userRepository;
         this.sessionRepository=sessionRepository;
         this.bCryptPasswordEncoder=bCryptPasswordEncoder;
+        secretKey = Jwts.SIG.HS256.key().build();
     }
     public ResponseEntity<UserDto> login(String email, String password){
         Optional<User> user= userRepository.findByEmail(email);
@@ -43,23 +47,32 @@ public class AuthService {
 //        if(!password.matches(user1.getPassword())){
 //            throw new IllegalArgumentException("password is incorrect");
 //        }
-        String token=generateRandomString(10);
+//        String token=generateRandomString(10);
         Date now=new Date();
         Calendar calendar=Calendar.getInstance();
         calendar.setTime(now);
         calendar.add(Calendar.MINUTE,30);
         Date expiryat= calendar.getTime();
+
+        Map<String,Object> map=new HashMap<>();
+        map.put("email",email);
+        map.put("createdAt",now);
+        map.put("expiryat",expiryat);
+
+        String jwt=Jwts.builder().claims(map).signWith(secretKey).compact();
+
+
         SessionStatus sessionStatus=SessionStatus.ACTIVE;
 
         Session session=new Session();
-        session.setToken(token);
+        session.setToken(jwt);
         session.setExpiryAt(expiryat);
         session.setUser(user1);
         session.setSessionStatus(sessionStatus);
         sessionRepository.save(session);
         UserDto userDto=UserDto.from(user1);
         MultiValueMap<String,String> headers=new MultiValueMapAdapter<>(new HashMap<>());
-        headers.add(HttpHeaders.COOKIE,token);
+        headers.add(HttpHeaders.COOKIE,"auth-token="+jwt);
         return new ResponseEntity<>(userDto,headers, HttpStatusCode.valueOf(200));
 
     }
@@ -86,6 +99,20 @@ public class AuthService {
         if(sessionOptional.isEmpty())
             throw new IllegalArgumentException("Invalid userid or token,or no session exist for this combination");
         Session session= sessionOptional.get();
+        Jws<Claims> jws;
+        try {
+            jws=Jwts.parser().verifyWith(secretKey).build().parseSignedClaims(token);
+            }
+        catch (SignatureException signatureException){
+            session.setSessionStatus(SessionStatus.ENDED);
+            sessionRepository.save(session);
+            return SessionStatus.ENDED;
+        }
+
+            String email=(String) jws.getPayload().get("email");
+//            Date expiryAt=(Date) jws.getPayload().get("expiryat");
+
+
         Date expiryAt=session.getExpiryAt();
         Date now=new Date();
         if(expiryAt.before(now) || expiryAt.equals(now)){
