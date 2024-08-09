@@ -13,5 +13,8 @@ public interface UserRepository extends JpaRepository<User,Long> {
     Optional<User> findByEmail(String email);
 
     @Override
+    Optional<User> findById(Long aLong);
+
+    @Override
     <S extends User> S save(S entity);
 }
