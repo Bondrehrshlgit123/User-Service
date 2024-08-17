@@ -1,9 +1,13 @@
 package com.example.userservice.services;
 
+import com.example.userservice.dtos.SessionValidateResponseDto;
 import com.example.userservice.dtos.UserDto;
+import com.example.userservice.dtos.UserResponseDto;
+import com.example.userservice.models.Role;
 import com.example.userservice.models.Session;
 import com.example.userservice.models.SessionStatus;
 import com.example.userservice.models.User;
+import com.example.userservice.repositories.RoleRepository;
 import com.example.userservice.repositories.SessionRepository;
 import com.example.userservice.repositories.UserRepository;
 import io.jsonwebtoken.Claims;
@@ -27,17 +31,19 @@ import java.util.*;
 public class AuthService {
     private UserRepository userRepository;
     private SessionRepository sessionRepository;
+    private RoleRepository roleRepository;
     private BCryptPasswordEncoder bCryptPasswordEncoder;
     private SecretKey secretKey;
     @Autowired
     public AuthService(UserRepository userRepository, SessionRepository sessionRepository,
-                       BCryptPasswordEncoder bCryptPasswordEncoder){
+                       BCryptPasswordEncoder bCryptPasswordEncoder, RoleRepository roleRepository){
         this.userRepository=userRepository;
         this.sessionRepository=sessionRepository;
+        this.roleRepository=roleRepository;
         this.bCryptPasswordEncoder=bCryptPasswordEncoder;
         secretKey = Jwts.SIG.HS256.key().build();
     }
-    public ResponseEntity<UserDto> login(String email, String password){
+    public ResponseEntity<UserResponseDto> login(String email, String password){
         Optional<User> user= userRepository.findByEmail(email);
         if(user.isEmpty()) throw new RuntimeException("User not exist with this email");
         User user1= user.get();
@@ -56,6 +62,7 @@ public class AuthService {
 
         Map<String,Object> map=new HashMap<>();
         map.put("email",email);
+        map.put("role",user1.getRole().getRole());
         map.put("createdAt",now);
         map.put("expiryat",expiryat);
 
@@ -68,9 +75,10 @@ public class AuthService {
         session.setToken(jwt);
         session.setExpiryAt(expiryat);
         session.setUser(user1);
+        session.setRole(user1.getRole().getRole());
         session.setSessionStatus(sessionStatus);
         sessionRepository.save(session);
-        UserDto userDto=UserDto.from(user1);
+        UserResponseDto userDto=UserResponseDto.from(user1);
         MultiValueMap<String,String> headers=new MultiValueMapAdapter<>(new HashMap<>());
         headers.add(HttpHeaders.COOKIE,"auth-token="+jwt);
         return new ResponseEntity<>(userDto,headers, HttpStatusCode.valueOf(200));
@@ -86,45 +94,72 @@ public class AuthService {
         sessionRepository.save(session);
 
     }
-    public UserDto signup(String email, String password){
+    public UserResponseDto signup(String email, String password, Long roleid){
         User user=new User();
         user.setEmail(email);
         String encodedPassword = bCryptPasswordEncoder.encode(password);
         user.setPassword(encodedPassword);
+
+
+            Optional<Role> roleOptional=roleRepository.findById(roleid);
+            if(roleOptional.isEmpty()){
+                throw new IllegalArgumentException("Invalid role");
+            }
+            user.setRole(roleOptional.get());
+
+
         User saveduser=userRepository.save(user);
-        return UserDto.from(saveduser);
+        return UserResponseDto.from(saveduser);
     }
-    public SessionStatus validate(Long user_id,String token){
+    public SessionValidateResponseDto validate(Long user_id, String token){
         Optional<Session> sessionOptional=sessionRepository.findByUseridAndToken(user_id,token);
         if(sessionOptional.isEmpty())
             throw new IllegalArgumentException("Invalid userid or token,or no session exist for this combination");
         Session session= sessionOptional.get();
         Jws<Claims> jws;
+        String email;
+        String role;
+        Optional<User> userDtoOptional=userRepository.findById(user_id);
+        User user= userDtoOptional.get();
         try {
             jws=Jwts.parser().verifyWith(secretKey).build().parseSignedClaims(token);
+            email=(String) jws.getPayload().get("email");
+            role=(String) jws.getPayload().get("role");
             }
         catch (SignatureException signatureException){
             session.setSessionStatus(SessionStatus.ENDED);
             sessionRepository.save(session);
-            return SessionStatus.ENDED;
+//            String email=(String) jws.getPayload().get("email");
+//            String role=(String) jws.getPayload().get("role");
+            SessionValidateResponseDto sessionValidateResponseDto=new SessionValidateResponseDto();
+            sessionValidateResponseDto.setEmail(user.getEmail());
+            sessionValidateResponseDto.setRole(user.getRole().getRole());
+            sessionValidateResponseDto.setSessionStatus(SessionStatus.ENDED);
+            return sessionValidateResponseDto;
         }
 
-            String email=(String) jws.getPayload().get("email");
+            email=(String) jws.getPayload().get("email");
+            role=(String) jws.getPayload().get("role");
 //            Date expiryAt=(Date) jws.getPayload().get("expiryat");
-
+        SessionValidateResponseDto sessionValidateResponseDto=new SessionValidateResponseDto();
+        sessionValidateResponseDto.setEmail(email);
+        sessionValidateResponseDto.setRole(role);
 
         Date expiryAt=session.getExpiryAt();
         Date now=new Date();
         if(expiryAt.before(now) || expiryAt.equals(now)){
             session.setSessionStatus(SessionStatus.ENDED);
             sessionRepository.save(session);
-            return SessionStatus.ENDED;
+            sessionValidateResponseDto.setSessionStatus(SessionStatus.ENDED);
+            return sessionValidateResponseDto;
         } else if (expiryAt.after(now)) {
             if(!session.getSessionStatus().equals(SessionStatus.ACTIVE)){
-                return SessionStatus.ENDED;
+                sessionValidateResponseDto.setSessionStatus(SessionStatus.ENDED);
+                return sessionValidateResponseDto;
             }
         }
-        return SessionStatus.ACTIVE;
+        sessionValidateResponseDto.setSessionStatus(SessionStatus.ACTIVE);
+        return sessionValidateResponseDto;
     }
     public static String generateRandomString(int length) {
         return RandomStringUtils.randomAlphanumeric(length);

@@ -17,4 +17,5 @@ public class Session extends BaseModel{
     private User user;
     @Enumerated(value = EnumType.ORDINAL)
     private SessionStatus sessionStatus;
+    private String role;
 }

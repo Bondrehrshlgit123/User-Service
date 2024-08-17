@@ -16,7 +16,7 @@ public class AuthController {
     @Autowired
     private AuthService authService;
     @PostMapping("/login")
-    public ResponseEntity<UserDto> login(@RequestBody LoginRequestDto loginRequestDto){
+    public ResponseEntity<UserResponseDto> login(@RequestBody LoginRequestDto loginRequestDto){
         return authService.login(loginRequestDto.getEmail(),loginRequestDto.getPassword());
 
     }
@@ -26,14 +26,14 @@ public class AuthController {
         return ResponseEntity.ok().build();
     }
     @PostMapping("/signup")
-    public ResponseEntity<UserDto> signup(@RequestBody SignupRequestDto requestDto){
-        UserDto userDto=authService.signup(requestDto.getEmail(),requestDto.getPassword());
+    public ResponseEntity<UserResponseDto> signup(@RequestBody SignupRequestDto requestDto){
+        UserResponseDto userDto=authService.signup(requestDto.getEmail(),requestDto.getPassword(),requestDto.getRole().getId());
         return new ResponseEntity<>(userDto, HttpStatusCode.valueOf(200));
     }
     @PostMapping("/validate")
-    public ResponseEntity<SessionStatus> validate(@RequestBody ValidateTokenRequestDto validateTokenRequestDto){
-        SessionStatus sessionStatus=authService.validate(validateTokenRequestDto.getUser_id(),
+    public ResponseEntity<SessionValidateResponseDto> validate(@RequestBody ValidateTokenRequestDto validateTokenRequestDto){
+        SessionValidateResponseDto sessionValidateResponseDto=authService.validate(validateTokenRequestDto.getUser_id(),
                 validateTokenRequestDto.getToken());
-        return new ResponseEntity<>(sessionStatus,HttpStatusCode.valueOf(200));
+        return new ResponseEntity<>(sessionValidateResponseDto,HttpStatusCode.valueOf(200));
     }
 }
